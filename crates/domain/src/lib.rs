@@ -1,3 +1,5 @@
+use sqlx::SqlitePool;
+
 pub mod auth;
 
 #[derive(Debug, thiserror::Error)]
@@ -43,13 +45,14 @@ pub struct Image {
 }
 
 pub struct DiaryService {
-    // database connection?
+    write: SqlitePool,
+    read: SqlitePool,
     // blob storatge access
 }
 
 impl DiaryService {
-    pub fn new() -> DiaryService {
-        return DiaryService {};
+    pub fn new(write: SqlitePool, read: SqlitePool) -> DiaryService {
+        return DiaryService { write, read };
     }
 
     // Spawns a task or needs to be run in a task. performs
@@ -57,7 +60,16 @@ impl DiaryService {
     pub async fn run_blob_gc(&self) -> () {}
 
     // Gets all diary details (not days though)
-    pub fn get_diaries(&self) {}
+    pub async fn get_diaries(&self) -> Result<Vec<Diary>> {
+        let diaries = sqlx::query_as!(
+            Diary,
+            "SELECT id, title, description, share_token, timezone, created_at FROM diary"
+        )
+        .fetch_all(&self.read)
+        .await?;
+
+        return Ok(diaries);
+    }
     // Gets one full diary
     pub fn get_diary(&self) {}
     // Creates a new diary entry and generates required data
