@@ -6,7 +6,7 @@ version.workspace = true
 [dependencies]
 base64 = "0.23.1"
 blake3 = "1.8.7"
-fast_image_resize = "6.1.0"
+fast_image_resize = { version = "6.1.0", features = ["image"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 infer = "0.22.0"
 jiff = "0.2.35"

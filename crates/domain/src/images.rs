@@ -1,0 +1,205 @@
+use std::path::PathBuf;
+
+use fast_image_resize::{IntoImageView, ResizeOptions, Resizer, images::Image};
+use image::{ImageDecoder, ImageReader, Limits};
+
+use crate::{Error, Result};
+
+/// Widths generated for every upload, largest last. Steps wider than the
+/// original are skipped so we never upscale.
+const WIDTH_LADDER: [u32; 4] = [400, 800, 1600, 2400];
+
+const WEBP_QUALITY: f32 = 80.0;
+
+const MAX_DIMENSION: u32 = 12_000;
+const MAX_ALLOC: u64 = 256 * 1024 * 1024;
+
+pub struct ImageService {
+    images_dir: PathBuf,
+}
+
+pub struct ImageUpload {
+    pub hash: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+pub struct SourceSetEntry {
+    pub url: String,
+    pub width: u32,
+}
+
+impl ImageService {
+    pub fn new(images_dir: PathBuf) -> Self {
+        ImageService { images_dir }
+    }
+
+    // Spawns a task or needs to be run in a task. performs
+    // bg image gc
+    pub async fn run_blob_gc(&self) -> () {}
+
+    pub async fn upload_image(&self, image_bytes: &[u8]) -> Result<ImageUpload> {
+        let mut limits = Limits::default();
+        limits.max_image_width = Some(MAX_DIMENSION);
+        limits.max_image_height = Some(MAX_DIMENSION);
+        limits.max_alloc = Some(MAX_ALLOC);
+
+        let mut reader =
+            ImageReader::new(std::io::Cursor::new(image_bytes)).with_guessed_format()?;
+        reader.limits(limits);
+
+        // Orientation must come off the decoder before the pixels are taken:
+        // decoding drops the metadata, and re-encoding never carries it over.
+        let mut decoder = reader.into_decoder()?;
+        let orientation = decoder.orientation()?;
+        let mut decoded = image::DynamicImage::from_decoder(decoder)?;
+        decoded.apply_orientation(orientation);
+
+        // Measured after rotating, so they describe what a browser lays out.
+        let source = image::DynamicImage::ImageRgb8(decoded.to_rgb8());
+        let width = source.width();
+        let height = source.height();
+
+        let hash = blake3::hash(image_bytes).to_hex().to_string();
+        let dir = self.images_dir.join(&hash);
+        std::fs::create_dir_all(&dir)?;
+
+        let pixel_type = source.pixel_type().ok_or(Error::UnsupportedImage)?;
+        let mut resizer = Resizer::new();
+
+        for target_width in ladder_for(width) {
+            let target_height = scale_height(width, height, target_width);
+
+            let mut dst = Image::new(target_width, target_height, pixel_type);
+            resizer.resize(&source, &mut dst, &ResizeOptions::new())?;
+
+            let encoded = webp::Encoder::from_rgb(dst.buffer(), target_width, target_height)
+                .encode(WEBP_QUALITY);
+
+            std::fs::write(dir.join(format!("{target_width}.webp")), &*encoded)?;
+        }
+
+        return Ok(ImageUpload {
+            hash,
+            width,
+            height,
+        });
+    }
+
+    pub fn derive_sourceset(&self, hash: &str, original_width: u32) -> Vec<SourceSetEntry> {
+        return ladder_for(original_width)
+            .map(|width| SourceSetEntry {
+                url: format!("/img/{hash}/{width}.webp"),
+                width,
+            })
+            .collect();
+    }
+}
+
+fn ladder_for(original_width: u32) -> impl Iterator<Item = u32> {
+    return WIDTH_LADDER
+        .into_iter()
+        .filter(move |w| *w < original_width)
+        .chain(std::iter::once(original_width));
+}
+
+fn scale_height(src_width: u32, src_height: u32, dst_width: u32) -> u32 {
+    return ((src_height as u64 * dst_width as u64) / src_width as u64).max(1) as u32;
+}
+
+// Claude written
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A JPEG carrying a single EXIF Orientation tag, built by hand so the
+    /// test doesn't need a binary fixture.
+    fn jpeg_with_orientation(width: u32, height: u32, orientation: u16) -> Vec<u8> {
+        let mut jpeg = Vec::new();
+        image::DynamicImage::ImageRgb8(image::RgbImage::new(width, height))
+            .write_to(
+                &mut std::io::Cursor::new(&mut jpeg),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+
+        let mut tiff = Vec::new();
+        tiff.extend_from_slice(b"II*\0");
+        tiff.extend_from_slice(&8u32.to_le_bytes()); // offset of IFD0
+        tiff.extend_from_slice(&1u16.to_le_bytes()); // one entry
+        tiff.extend_from_slice(&0x0112u16.to_le_bytes()); // Orientation
+        tiff.extend_from_slice(&3u16.to_le_bytes()); // SHORT
+        tiff.extend_from_slice(&1u32.to_le_bytes()); // count
+        tiff.extend_from_slice(&orientation.to_le_bytes());
+        tiff.extend_from_slice(&[0, 0]); // value field padded to 4 bytes
+        tiff.extend_from_slice(&0u32.to_le_bytes()); // no next IFD
+
+        let mut app1 = Vec::from(*b"Exif\0\0");
+        app1.extend_from_slice(&tiff);
+
+        let mut out = Vec::new();
+        out.extend_from_slice(&jpeg[..2]); // SOI
+        out.extend_from_slice(&[0xFF, 0xE1]);
+        out.extend_from_slice(&((app1.len() + 2) as u16).to_be_bytes());
+        out.extend_from_slice(&app1);
+        out.extend_from_slice(&jpeg[2..]);
+        out
+    }
+
+    fn upload(bytes: &[u8]) -> (tempfile::TempDir, ImageService, ImageUpload) {
+        let dir = tempfile::tempdir().unwrap();
+        let service = ImageService::new(dir.path().to_path_buf());
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let uploaded = rt.block_on(service.upload_image(bytes)).unwrap();
+        (dir, service, uploaded)
+    }
+
+    #[test]
+    fn applies_exif_orientation() {
+        let (_dir, _service, uploaded) = upload(&jpeg_with_orientation(1000, 500, 6));
+
+        // Orientation 6 means "rotate 90", so the landscape source is
+        // displayed as a portrait and the dimensions swap.
+        assert_eq!((uploaded.width, uploaded.height), (500, 1000));
+    }
+
+    #[test]
+    fn leaves_unoriented_images_alone() {
+        let (_dir, _service, uploaded) = upload(&jpeg_with_orientation(1000, 500, 1));
+
+        assert_eq!((uploaded.width, uploaded.height), (1000, 500));
+    }
+
+    #[test]
+    fn strips_exif_from_written_variants() {
+        let (dir, service, uploaded) = upload(&jpeg_with_orientation(1000, 500, 6));
+
+        for entry in service.derive_sourceset(&uploaded.hash, uploaded.width) {
+            let file = dir
+                .path()
+                .join(&uploaded.hash)
+                .join(format!("{}.webp", entry.width));
+            let written = std::fs::read(&file).unwrap();
+
+            assert!(
+                written.windows(4).all(|w| w != b"Exif"),
+                "{file:?} still carries an EXIF chunk"
+            );
+        }
+    }
+
+    #[test]
+    fn ladder_never_upscales() {
+        for original in [300u32, 400, 900, 1000, 3000] {
+            let steps: Vec<u32> = ladder_for(original).collect();
+
+            assert!(!steps.is_empty());
+            assert!(
+                steps.iter().all(|s| *s <= original),
+                "{original} -> {steps:?}"
+            );
+        }
+    }
+}
