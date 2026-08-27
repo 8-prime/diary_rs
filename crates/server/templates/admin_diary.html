@@ -9,6 +9,7 @@
   Times are read and shown in {{ diary.timezone }}.
 </p>
 
+<div class="panel">
 <h2>New entry</h2>
 <form method="post" action="/admin/diaries/{{ diary.id }}/entries" enctype="multipart/form-data">
   <label>What happened
@@ -84,15 +85,16 @@
   });
 })();
 </script>
+</div>
 
 <h2>Entries</h2>
 {% for day in days %}
-  <section class="day">
-    <h3>{{ day.local_date }}</h3>
+  <section class="sheet">
+    <h3 class="date">{{ day.local_date }}</h3>
     {% for entry in day.entries %}
       <article class="entry">
         {% for image in entry.images %}
-          <figure>
+          <figure class="photo">
             <img src="{{ image.src }}" srcset="{{ image.srcset }}" sizes="(max-width: 46rem) 100vw, 46rem"
                  width="{{ image.width }}" height="{{ image.height }}"
                  alt="{{ image.alt }}" loading="lazy">
@@ -118,6 +120,7 @@
   <p class="muted">No entries yet.</p>
 {% endfor %}
 
+<div class="panel">
 <h2>Settings</h2>
 <form method="post" action="/admin/diaries/{{ diary.id }}">
   <label>Title <input type="text" name="title" value="{{ diary.title }}" required></label>
@@ -134,4 +137,5 @@
   <button type="submit">Delete diary</button>
   <span class="muted">Removes every entry too.</span>
 </form>
+</div>
 {% endblock %}

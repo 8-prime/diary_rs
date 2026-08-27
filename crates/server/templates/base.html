@@ -5,18 +5,155 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Cat Diary{% endblock %}</title>
   <style>
-    :root { color-scheme: light dark; }
-    body { font-family: system-ui, sans-serif; line-height: 1.5;
-           max-width: 46rem; margin: 0 auto; padding: 1rem; }
-    img { max-width: 100%; height: auto; border-radius: 6px; display: block; }
-    figure { margin: 0 0 1rem; }
-    .entry { padding: 1rem 0; border-bottom: 1px solid rgba(128,128,128,.3); }
-    .day { margin-top: 2rem; }
+    :root {
+      color-scheme: light dark;
+
+      /* Every vertical measurement on a sheet is a multiple of this, which is
+         what keeps the writing sitting on the lines instead of drifting. */
+      --rule: 1.9rem;
+      --margin-x: 3.5rem;
+
+      --desk: #e7e1d4;
+      --paper: #fdfbf3;
+      --rule-line: #cadff0;
+      --margin-line: #eba9a9;
+      --ink: #2b3a55;
+      --ink-faded: #6b7a93;
+      --frame: #fffefb;
+
+      /* No webfont: a diary served from your own box should not be fetching
+         anything from a font CDN. These are the script faces that ship with
+         Windows, macOS and iOS, with the generic as the last resort. */
+      --hand: "Segoe Script", "Bradley Hand", "Snell Roundhand", "Noteworthy",
+              "Comic Sans MS", "Chalkboard SE", cursive;
+      --ui: system-ui, sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --desk: #14161b;
+        --paper: #23262e;
+        --rule-line: #333c4b;
+        --margin-line: #6d4348;
+        --ink: #e6e1d5;
+        --ink-faded: #9aa3b2;
+        --frame: #2c3038;
+      }
+    }
+
+    body {
+      font-family: var(--ui);
+      line-height: 1.5;
+      max-width: 46rem;
+      margin: 0 auto;
+      padding: 1rem;
+      background: var(--desk);
+      color: var(--ink);
+    }
+
+    /* ---- a sheet of ruled paper ------------------------------------- */
+
+    .sheet {
+      font-family: var(--hand);
+      font-size: 1.2rem;
+      line-height: var(--rule);
+      color: var(--ink);
+      background-color: var(--paper);
+      /* The line is drawn at the bottom of each band, so it lands under the
+         baseline of the text occupying that band. */
+      background-image: repeating-linear-gradient(
+        to bottom,
+        transparent 0,
+        transparent calc(var(--rule) - 1px),
+        var(--rule-line) calc(var(--rule) - 1px),
+        var(--rule-line) var(--rule)
+      );
+      padding: var(--rule) 1.5rem var(--rule) var(--margin-x);
+      margin: 0 0 2rem;
+      position: relative;
+      border-radius: 2px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, .12), 0 10px 28px rgba(0, 0, 0, .10);
+    }
+
+    .sheet::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: calc(var(--margin-x) - .9rem);
+      border-left: 1px solid var(--margin-line);
+    }
+
+    .sheet .date {
+      font-size: 1.35rem;
+      font-weight: normal;
+      line-height: var(--rule);
+      margin: 0 0 var(--rule);
+      color: var(--ink);
+    }
+
+    .sheet .entry {
+      margin: 0 0 var(--rule);
+      padding: 0;
+      border: 0;
+    }
+
+    .sheet p {
+      margin: 0 0 var(--rule);
+      line-height: var(--rule);
+    }
+
+    /* ---- photos taped onto the page --------------------------------- */
+
+    /* A fixed, rule-aligned height is what stops a photo of arbitrary size
+       from pushing everything below it off the lines. */
+    .photo {
+      height: calc(var(--rule) * 11);
+      margin: 0 0 var(--rule);
+      display: flex;
+      justify-content: center;
+    }
+
+    .photo img {
+      height: 100%;
+      width: auto;
+      max-width: 100%;
+      object-fit: contain;
+      background: var(--frame);
+      padding: .5rem;
+      border-radius: 1px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, .2), 0 6px 16px rgba(0, 0, 0, .18);
+      /* Rotation is a transform, so it tilts the print without disturbing
+         the layout the rules are aligned to. */
+      transform: rotate(-1.1deg);
+    }
+
+    .photo:nth-of-type(even) img { transform: rotate(1.4deg); }
+
+    /* ---- masthead and plain UI -------------------------------------- */
+
+    .masthead { margin: 1rem 0 2rem; text-align: center; }
+    .masthead h1 { font-family: var(--hand); font-weight: normal; margin: 0; }
+    .masthead .subtitle { font-family: var(--hand); color: var(--ink-faded); margin: .25rem 0 0; }
+
+    h1, h2, h3 { line-height: 1.3; }
+    a { color: inherit; }
+
     form { margin: 1rem 0; }
     label { display: block; margin: .5rem 0; }
-    input[type=text], input[type=url], textarea, select { width: 100%; }
+    input[type=text], input[type=password], input[type=url], textarea, select { width: 100%; }
+    button, input, textarea, select { font-family: var(--ui); font-size: 1rem; }
     .row { display: flex; gap: .5rem; flex-wrap: wrap; }
-    .muted { opacity: .7; font-size: .9em; }
+    .muted { opacity: .7; font-size: .9em; font-family: var(--ui); }
+
+    /* Admin panels stay plain paper-white so the forms are legible. */
+    .panel {
+      background: var(--paper);
+      border-radius: 2px;
+      padding: 1rem 1.25rem;
+      margin: 0 0 1.5rem;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
+    }
   </style>
 </head>
 <body>

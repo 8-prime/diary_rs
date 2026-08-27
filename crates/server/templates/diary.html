@@ -1,18 +1,20 @@
 {% extends "base.html" %}
 {% block title %}{{ diary.title }}{% endblock %}
 {% block content %}
-<h1>{{ diary.title }}</h1>
-{% if let Some(description) = diary.description %}
-  <p>{{ description }}</p>
-{% endif %}
+<header class="masthead">
+  <h1>{{ diary.title }}</h1>
+  {% if let Some(description) = diary.description %}
+    <p class="subtitle">{{ description }}</p>
+  {% endif %}
+</header>
 
 {% for day in days %}
-  <section class="day">
-    <h2>{{ day.local_date }}</h2>
+  <section class="sheet">
+    <h2 class="date">{{ day.local_date }}</h2>
     {% for entry in day.entries %}
       <article class="entry">
         {% for image in entry.images %}
-          <figure>
+          <figure class="photo">
             <img src="{{ image.src }}" srcset="{{ image.srcset }}" sizes="(max-width: 46rem) 100vw, 46rem"
                  width="{{ image.width }}" height="{{ image.height }}"
                  alt="{{ image.alt }}" loading="lazy">
@@ -25,6 +27,6 @@
     {% endfor %}
   </section>
 {% else %}
-  <p class="muted">Nothing here yet.</p>
+  <section class="sheet"><p>Nothing here yet.</p></section>
 {% endfor %}
 {% endblock %}
