@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT image.id, image.entry_id, image.hash, image.width,\n                    image.height, image.position, image.alt\n             FROM image\n             JOIN entry ON entry.id = image.entry_id\n             WHERE entry.diary_id = ?\n             ORDER BY image.position ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "image",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "entry_id",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "image",
+            "name": "entry_id"
+          }
+        }
+      },
+      {
+        "name": "hash",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "image",
+            "name": "hash"
+          }
+        }
+      },
+      {
+        "name": "width",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "image",
+            "name": "width"
+          }
+        }
+      },
+      {
+        "name": "height",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "image",
+            "name": "height"
+          }
+        }
+      },
+      {
+        "name": "position",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "image",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "alt",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "image",
+            "name": "alt"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "7c58bbbf5e3aa5d6e4137b09a2b6e05838c581558e442cdbf51714bf803c7f16"
+}
