@@ -81,7 +81,19 @@ impl ImageService {
         return is_blob_hash(hash) && self.images_dir.join(hash).is_dir();
     }
 
-    pub async fn upload_image(&self, image_bytes: &[u8]) -> Result<ImageUpload> {
+    /// Decoding, resizing and encoding are entirely CPU-bound and take on the
+    /// order of a second per photo. Run directly they would occupy a runtime
+    /// worker for that whole time, stalling every other request scheduled on
+    /// it, so the work goes to the blocking pool instead.
+    pub async fn upload_image(&self, image_bytes: Vec<u8>) -> Result<ImageUpload> {
+        let service = self.clone();
+
+        return tokio::task::spawn_blocking(move || service.process(&image_bytes))
+            .await
+            .map_err(|err| Error::Io(std::io::Error::other(err)))?;
+    }
+
+    fn process(&self, image_bytes: &[u8]) -> Result<ImageUpload> {
         let mut limits = Limits::default();
         limits.max_image_width = Some(MAX_DIMENSION);
         limits.max_image_height = Some(MAX_DIMENSION);
@@ -145,10 +157,16 @@ fn is_blob_hash(hash: &str) -> bool {
 }
 
 fn ladder_for(original_width: u32) -> impl Iterator<Item = u32> {
+    // Two ceilings. Anything wider than the source would be upscaling, and
+    // anything past the widest rung is more pixels than the layout can use --
+    // a full-resolution phone photo costs more to encode than every other
+    // variant combined and is never the one a browser picks.
+    let widest = original_width.min(WIDTH_LADDER[WIDTH_LADDER.len() - 1]);
+
     return WIDTH_LADDER
         .into_iter()
-        .filter(move |w| *w < original_width)
-        .chain(std::iter::once(original_width));
+        .filter(move |w| *w < widest)
+        .chain(std::iter::once(widest));
 }
 
 fn scale_height(src_width: u32, src_height: u32, dst_width: u32) -> u32 {
@@ -200,7 +218,7 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        let uploaded = rt.block_on(service.upload_image(bytes)).unwrap();
+        let uploaded = rt.block_on(service.upload_image(bytes.to_vec())).unwrap();
         (dir, service, uploaded)
     }
 
@@ -236,6 +254,18 @@ mod tests {
                 "{file:?} still carries an EXIF chunk"
             );
         }
+    }
+
+    #[test]
+    fn ladder_stops_at_the_widest_rung() {
+        // A phone photo gets the four rungs and nothing at full resolution.
+        let steps: Vec<u32> = ladder_for(4032).collect();
+        assert_eq!(steps, WIDTH_LADDER);
+
+        // Below the top rung the original is still the last step, so smaller
+        // images keep an exact-size variant.
+        assert_eq!(ladder_for(900).collect::<Vec<u32>>(), [400, 800, 900]);
+        assert_eq!(ladder_for(2400).collect::<Vec<u32>>(), WIDTH_LADDER);
     }
 
     #[test]

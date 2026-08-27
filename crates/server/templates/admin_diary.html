@@ -18,10 +18,72 @@
     <input type="datetime-local" name="occurred_at">
   </label>
   <label>Photos
-    <input type="file" name="photos" accept="image/*" multiple>
+    <input type="file" name="photos" id="photos" accept="image/*" multiple>
   </label>
-  <button type="submit">Post entry</button>
+  <div id="staged"></div>
+  <p id="photo-status" class="muted"></p>
+  <button type="submit" id="post-entry">Post entry</button>
 </form>
+
+<script>
+// Uploads each photo as soon as it is picked, so submitting the entry only
+// has to send a few hashes. Without JavaScript the file input posts with the
+// form instead and the server does the same work in one slower request.
+(function () {
+  const input = document.getElementById("photos");
+  const staged = document.getElementById("staged");
+  const status = document.getElementById("photo-status");
+  const submit = document.getElementById("post-entry");
+
+  input.addEventListener("change", async function () {
+    const files = Array.from(input.files);
+    if (files.length === 0) return;
+
+    // The bytes must not also travel with the form once they are stored.
+    input.value = "";
+    submit.disabled = true;
+
+    for (const file of files) {
+      status.textContent = "Uploading " + file.name + "…";
+      const body = new FormData();
+      body.append("photo", file);
+
+      let response;
+      try {
+        response = await fetch("/admin/photos", { method: "POST", body: body });
+      } catch (err) {
+        status.textContent = "Upload failed for " + file.name;
+        submit.disabled = false;
+        return;
+      }
+      if (!response.ok) {
+        status.textContent = "Upload failed for " + file.name + " (" + response.status + ")";
+        submit.disabled = false;
+        return;
+      }
+
+      const photo = await response.json();
+      // Order matters: the server reads width and height as belonging to the
+      // hash that came before them.
+      for (const field of ["hash", "width", "height"]) {
+        const hidden = document.createElement("input");
+        hidden.type = "hidden";
+        hidden.name = field;
+        hidden.value = photo[field];
+        staged.appendChild(hidden);
+      }
+
+      const note = document.createElement("p");
+      note.className = "muted";
+      note.textContent = file.name + " ready";
+      staged.appendChild(note);
+    }
+
+    status.textContent = "";
+    submit.disabled = false;
+  });
+})();
+</script>
 
 <h2>Entries</h2>
 {% for day in days %}

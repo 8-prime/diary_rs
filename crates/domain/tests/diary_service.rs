@@ -54,7 +54,7 @@ fn wiring() {
         let svc = DiaryService::new(write.clone(), read.clone(), images.clone());
 
         // ---- photo -> diary -> entries -------------------------------------
-        let photo = images.upload_image(&jpeg(1000, 500)).await.unwrap();
+        let photo = images.upload_image(jpeg(1000, 500)).await.unwrap();
         assert_eq!((photo.width, photo.height), (1000, 500));
 
         let diary = svc

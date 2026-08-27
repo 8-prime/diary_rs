@@ -1,5 +1,5 @@
 use axum::{
-    Form,
+    Form, Json,
     extract::{Multipart, Path, State},
     response::{Html, Redirect},
 };
@@ -7,7 +7,7 @@ use domain::{
     auth::Admin,
     diary::{NewDiary, NewEntry, NewImage, timestamp_from_local},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     error::AppError,
@@ -106,6 +106,44 @@ pub async fn delete_diary(
     return Ok(Redirect::to("/admin"));
 }
 
+#[derive(Serialize)]
+pub struct UploadedPhoto {
+    pub hash: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Stores one blob and reports what it became. The page posts here as soon as
+/// a file is picked, so the slow part is over before the entry is submitted --
+/// nothing is written to the database, and an abandoned blob is reclaimed by
+/// the sweep.
+pub async fn upload_photo(
+    _admin: Admin,
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<Json<UploadedPhoto>, AppError> {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(AppError::bad_request)?
+    {
+        if field.name().unwrap_or_default() != "photo" {
+            continue;
+        }
+
+        let bytes = field.bytes().await.map_err(AppError::bad_request)?;
+        let uploaded = state.images.upload_image(bytes.to_vec()).await?;
+
+        return Ok(Json(UploadedPhoto {
+            hash: uploaded.hash,
+            width: uploaded.width,
+            height: uploaded.height,
+        }));
+    }
+
+    return Err(AppError::BadRequest("no photo field".into()));
+}
+
 /// Text and photos arrive together in one multipart POST, so posting an entry
 /// works without any JavaScript. The blobs are written first and the row is
 /// written second -- the other order would reference a file that is not there
@@ -130,6 +168,38 @@ pub async fn create_entry(
             "occurred_at" => {
                 occurred_at_local = field.text().await.map_err(AppError::bad_request)?
             }
+            // Sent by the page once a photo has already been uploaded. The
+            // three fields arrive in order, so each hash opens a new image
+            // and the dimensions that follow belong to it.
+            "hash" => {
+                let hash = field.text().await.map_err(AppError::bad_request)?;
+                images.push(NewImage {
+                    hash,
+                    width: 0,
+                    height: 0,
+                    alt: None,
+                });
+            }
+            "width" | "height" => {
+                let name = field.name().unwrap_or_default().to_string();
+                let value: u32 = field
+                    .text()
+                    .await
+                    .map_err(AppError::bad_request)?
+                    .parse()
+                    .map_err(AppError::bad_request)?;
+
+                let Some(image) = images.last_mut() else {
+                    return Err(AppError::BadRequest(format!("{name} before hash")));
+                };
+
+                if name == "width" {
+                    image.width = value;
+                } else {
+                    image.height = value;
+                }
+            }
+            // The no-JavaScript fallback: the bytes themselves came along.
             "photos" => {
                 let bytes = field.bytes().await.map_err(AppError::bad_request)?;
                 // An empty file input still sends one empty part.
@@ -137,7 +207,7 @@ pub async fn create_entry(
                     continue;
                 }
 
-                let uploaded = state.images.upload_image(&bytes).await?;
+                let uploaded = state.images.upload_image(bytes.to_vec()).await?;
                 images.push(NewImage {
                     hash: uploaded.hash,
                     width: uploaded.width,

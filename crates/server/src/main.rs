@@ -39,6 +39,10 @@ fn admin_routes() -> Router<AppState> {
             "/admin/diaries/{id}/entries",
             post(admin::create_entry).layer(DefaultBodyLimit::max(MAX_UPLOAD)),
         )
+        .route(
+            "/admin/photos",
+            post(admin::upload_photo).layer(DefaultBodyLimit::max(MAX_UPLOAD)),
+        )
         .route("/admin/entries/{id}", post(admin::update_entry))
         .route("/admin/entries/{id}/delete", post(admin::delete_entry))
         .route("/admin/photos/{id}/delete", post(admin::delete_photo));
