@@ -1871,6 +1871,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "domain",
+ "dotenvy",
  "serde",
  "serde_json",
  "time",

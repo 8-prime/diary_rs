@@ -59,6 +59,18 @@ fn env_or(key: &str, default: &str) -> String {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Before anything reads the environment, so RUST_LOG set in .env still
+    // reaches the logger below. A missing file is the normal case in
+    // production, where the values come from the container instead -- and
+    // real environment variables always win over the file either way.
+    match dotenvy::dotenv() {
+        Ok(path) => println!("loaded environment from {}", path.display()),
+        Err(err) if err.not_found() => {}
+        // A malformed .env is worth failing on: the alternative is starting
+        // with half the configuration silently missing.
+        Err(err) => return Err(err.into()),
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -71,8 +83,14 @@ async fn main() -> anyhow::Result<()> {
         std::env::var("ADMIN_TOKEN").map_err(|_| anyhow::anyhow!("ADMIN_TOKEN must be set"))?;
 
     let data_dir = PathBuf::from(env_or("DATA_DIR", "data"));
-    let images_dir = data_dir.join("images");
+    // Blobs can live on a different disk than the database, so they get their
+    // own knob; without it they sit next to it.
+    let images_dir = match std::env::var("FILE_STORAGE") {
+        Ok(dir) => PathBuf::from(dir),
+        Err(_) => data_dir.join("images"),
+    };
     std::fs::create_dir_all(&images_dir)?;
+    std::fs::create_dir_all(&data_dir)?;
 
     let (write, read) = domain::db::connect(&data_dir.join("diary.db")).await?;
 
