@@ -12,7 +12,7 @@ use crate::{Error, Result};
 pub struct Admin(());
 
 // 7 Days
-const SESSION_TTL: Duration = Duration::from_secs(60 * 60 * 24 * 7);
+pub const SESSION_TTL: Duration = Duration::from_secs(60 * 60 * 24 * 7);
 
 pub struct AuthService {
     sessions: std::sync::RwLock<HashMap<[u8; 32], Instant>>, // admin token from env
@@ -21,6 +21,21 @@ pub struct AuthService {
 
 pub struct Session {
     token: String,
+}
+
+impl Session {
+    /// The value to put in the cookie.
+    pub fn token(&self) -> &str {
+        return &self.token;
+    }
+}
+
+/// Hand-written so a stray `{:?}` in a log line cannot print a live session
+/// token, which is as good as a password.
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        return f.debug_struct("Session").field("token", &"<redacted>").finish();
+    }
 }
 
 impl AuthService {

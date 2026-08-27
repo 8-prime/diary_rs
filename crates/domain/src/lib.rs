@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod db;
 pub mod diary;
 pub mod images;
 
@@ -12,6 +13,8 @@ pub enum Error {
     NotFound,
     #[error(transparent)]
     Db(#[from] sqlx::Error),
+    #[error(transparent)]
+    Migrate(#[from] sqlx::migrate::MigrateError),
     #[error("unreadable image")]
     BadImage(#[from] image::ImageError),
     #[error("unsupported pixel format")]

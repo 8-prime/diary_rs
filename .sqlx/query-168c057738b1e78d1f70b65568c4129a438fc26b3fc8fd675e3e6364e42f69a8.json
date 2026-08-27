@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM image WHERE id = ? RETURNING entry_id AS \"entry_id!\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "entry_id!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "image",
+            "name": "entry_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "168c057738b1e78d1f70b65568c4129a438fc26b3fc8fd675e3e6364e42f69a8"
+}

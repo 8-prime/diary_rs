@@ -269,12 +269,19 @@ impl DiaryService {
         return Ok(share_token);
     }
 
-    pub async fn create_entry(&self, diary_id: i64, new: NewEntry) -> Result<EntryView> {
+    /// The timezone entries in this diary are dated in. Handlers need it to
+    /// read a wall-clock time off a form.
+    pub async fn diary_timezone(&self, diary_id: i64) -> Result<String> {
         let timezone = sqlx::query_scalar!("SELECT timezone FROM diary WHERE id = ?", diary_id)
             .fetch_optional(&self.read)
             .await?
             .ok_or(Error::NotFound)?;
 
+        return Ok(timezone);
+    }
+
+    pub async fn create_entry(&self, diary_id: i64, new: NewEntry) -> Result<EntryView> {
+        let timezone = self.diary_timezone(diary_id).await?;
         let local_date = local_date_for(&timezone, new.occurred_at)?;
         let created_at = Timestamp::now().as_second();
 
@@ -337,6 +344,23 @@ impl DiaryService {
         return Ok(EntryView { entry, images });
     }
 
+    /// One entry on its own. Handlers use it to find the diary an entry
+    /// belongs to, which is where they have to redirect back to.
+    pub async fn get_entry(&self, entry_id: i64) -> Result<Entry> {
+        let entry = sqlx::query_as!(
+            Entry,
+            "SELECT id, diary_id, local_date, occurred_at, created_at, text
+             FROM entry
+             WHERE id = ?",
+            entry_id
+        )
+        .fetch_optional(&self.read)
+        .await?
+        .ok_or(Error::NotFound)?;
+
+        return Ok(entry);
+    }
+
     // update diary text
     pub async fn update_entry(&self, entry_id: i64, text: Option<&str>) -> Result<Entry> {
         let entry = sqlx::query_as!(
@@ -367,19 +391,18 @@ impl DiaryService {
         return Ok(());
     }
 
-    // removes only the db entry but not the blob?!
-    pub async fn delete_photo(&self, image_id: i64) -> Result<()> {
-        // The blob stays: another entry may share the hash, and the sweep
-        // below is what eventually reclaims it.
-        let deleted = sqlx::query!("DELETE FROM image WHERE id = ?", image_id)
-            .execute(&self.write)
-            .await?;
+    /// Removes the row and returns the entry it belonged to. The blob stays:
+    /// another entry may share the hash, and the sweep is what reclaims it.
+    pub async fn delete_photo(&self, image_id: i64) -> Result<i64> {
+        let deleted = sqlx::query_scalar!(
+            r#"DELETE FROM image WHERE id = ? RETURNING entry_id AS "entry_id!""#,
+            image_id
+        )
+        .fetch_optional(&self.write)
+        .await?
+        .ok_or(Error::NotFound)?;
 
-        if deleted.rows_affected() == 0 {
-            return Err(Error::NotFound);
-        }
-
-        return Ok(());
+        return Ok(deleted);
     }
 
     /// Every blob hash still pointed at by a row. The blob sweep needs this to
@@ -401,6 +424,31 @@ fn generate_share_token() -> String {
     let mut raw = [0u8; 32];
     rand::rng().fill_bytes(&mut raw);
     return URL_SAFE_NO_PAD.encode(raw);
+}
+
+/// Reads the value of an `<input type="datetime-local">` as a wall-clock time
+/// in the diary's own timezone. The browser sends no offset, so without the
+/// timezone the same string would mean different instants to different people.
+pub fn timestamp_from_local(timezone: &str, local: &str) -> Result<i64> {
+    let tz = TimeZone::get(timezone)?;
+
+    // The seconds are optional in what the browser sends, and jiff wants a
+    // complete civil time.
+    let padded = if local.len() == 16 {
+        format!("{local}:00")
+    } else {
+        local.to_string()
+    };
+
+    let civil: jiff::civil::DateTime = padded.parse()?;
+
+    // A wall-clock time can be ambiguous across a DST change; taking the
+    // earlier of the two is a better answer than refusing the entry.
+    return Ok(civil
+        .to_zoned(tz)
+        .map_err(crate::Error::Time)?
+        .timestamp()
+        .as_second());
 }
 
 /// The calendar day an instant falls on for the people reading the diary,

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Diaries{% endblock %}
+{% block content %}
+<h1>Diaries</h1>
+
+<ul>
+{% for diary in diaries %}
+  <li><a href="/admin/diaries/{{ diary.id }}">{{ diary.title }}</a></li>
+{% else %}
+  <li class="muted">Nothing here yet.</li>
+{% endfor %}
+</ul>
+
+<h2>New diary</h2>
+<form method="post" action="/admin/diaries">
+  <label>Title <input type="text" name="title" required></label>
+  <label>Description <input type="text" name="description"></label>
+  <label>Timezone <input type="text" name="timezone" value="Europe/Berlin" required></label>
+  <button type="submit">Create</button>
+</form>
+
+<form method="post" action="/logout"><button type="submit">Sign out</button></form>
+{% endblock %}

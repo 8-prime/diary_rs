@@ -180,3 +180,21 @@ fn wiring() {
         ));
     });
 }
+
+#[test]
+fn reads_wall_clock_times_in_the_diary_timezone() {
+    use domain::diary::timestamp_from_local;
+
+    // Winter: Berlin is UTC+1, so 00:30 local is 23:30 the previous day UTC.
+    assert_eq!(
+        timestamp_from_local("Europe/Berlin", "2026-01-02T00:30").unwrap(),
+        ts("2026-01-01T23:30:00Z")
+    );
+    // Summer: UTC+2.
+    assert_eq!(
+        timestamp_from_local("Europe/Berlin", "2026-07-01T12:00:00").unwrap(),
+        ts("2026-07-01T10:00:00Z")
+    );
+    assert!(timestamp_from_local("Europe/Berlin", "nonsense").is_err());
+    assert!(timestamp_from_local("Not/AZone", "2026-01-02T00:30").is_err());
+}
