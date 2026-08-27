@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE diary SET share_token = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "b35bd67a44e2314dcfb3de2e8e1e2b2b354ccc0e4e9d67695cb6b02911e57055"
+}

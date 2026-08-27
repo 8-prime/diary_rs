@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT timezone FROM diary WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "timezone",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "diary",
+            "name": "timezone"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7109846bfea94ef0c1e550fc01ffbe1ef2186e3929fc28e0f05551259e233877"
+}

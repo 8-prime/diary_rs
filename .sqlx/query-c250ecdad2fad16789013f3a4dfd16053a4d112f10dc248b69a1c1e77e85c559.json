@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO image (entry_id, hash, width, height, position, alt)\n                   VALUES (?, ?, ?, ?, ?, ?)\n                   RETURNING id AS \"id!\", entry_id AS \"entry_id!\", hash AS \"hash!\",\n                             width AS \"width!\", height AS \"height!\",\n                             position AS \"position!\", alt",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "image",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "entry_id!",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "image",
+            "name": "entry_id"
+          }
+        }
+      },
+      {
+        "name": "hash!",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "image",
+            "name": "hash"
+          }
+        }
+      },
+      {
+        "name": "width!",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "image",
+            "name": "width"
+          }
+        }
+      },
+      {
+        "name": "height!",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "image",
+            "name": "height"
+          }
+        }
+      },
+      {
+        "name": "position!",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "image",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "alt",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "image",
+            "name": "alt"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      null,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "c250ecdad2fad16789013f3a4dfd16053a4d112f10dc248b69a1c1e77e85c559"
+}

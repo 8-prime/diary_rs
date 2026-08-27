@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::HashSet, path::PathBuf, time::Duration};
 
 use fast_image_resize::{IntoImageView, ResizeOptions, Resizer, images::Image};
 use image::{ImageDecoder, ImageReader, Limits};
@@ -14,6 +14,14 @@ const WEBP_QUALITY: f32 = 80.0;
 const MAX_DIMENSION: u32 = 12_000;
 const MAX_ALLOC: u64 = 256 * 1024 * 1024;
 
+/// How long a blob is left alone before the sweep may reclaim it. An upload
+/// that has been made but not yet submitted is referenced only by the open
+/// compose form, so anything newer than this is assumed to be in flight.
+const GC_MIN_AGE: Duration = Duration::from_secs(60 * 60);
+
+/// Cheap to clone -- it is a path and nothing else -- so the state that needs
+/// it and the services that consult it can each hold one.
+#[derive(Clone)]
 pub struct ImageService {
     images_dir: PathBuf,
 }
@@ -34,9 +42,44 @@ impl ImageService {
         ImageService { images_dir }
     }
 
-    // Spawns a task or needs to be run in a task. performs
-    // bg image gc
-    pub async fn run_blob_gc(&self) -> () {}
+    pub fn run_blob_gc(&self, referenced: &HashSet<String>) -> Result<usize> {
+        let mut reclaimed = 0;
+
+        for entry in std::fs::read_dir(&self.images_dir)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+
+            let name = entry.file_name();
+            let Some(hash) = name.to_str() else {
+                continue;
+            };
+
+            if !is_blob_hash(hash) || referenced.contains(hash) {
+                continue;
+            }
+
+            let age = entry
+                .metadata()?
+                .modified()?
+                .elapsed()
+                .unwrap_or(Duration::ZERO);
+            if age < GC_MIN_AGE {
+                continue;
+            }
+
+            std::fs::remove_dir_all(entry.path())?;
+            tracing::info!(hash, "reclaimed unreferenced blob");
+            reclaimed += 1;
+        }
+
+        return Ok(reclaimed);
+    }
+
+    pub fn exists(&self, hash: &str) -> bool {
+        return is_blob_hash(hash) && self.images_dir.join(hash).is_dir();
+    }
 
     pub async fn upload_image(&self, image_bytes: &[u8]) -> Result<ImageUpload> {
         let mut limits = Limits::default();
@@ -94,6 +137,11 @@ impl ImageService {
             })
             .collect();
     }
+}
+
+// used to ensure hash is blob hash to only delete dirs that are owned by this
+fn is_blob_hash(hash: &str) -> bool {
+    return hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit());
 }
 
 fn ladder_for(original_width: u32) -> impl Iterator<Item = u32> {

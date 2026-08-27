@@ -1,7 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use jiff::{Timestamp, tz::TimeZone};
+use rand::Rng;
 use sqlx::SqlitePool;
 
+use crate::images::ImageService;
 use crate::{Error, Result};
 
 pub struct Diary {
@@ -46,15 +50,38 @@ pub struct Image {
     pub alt: Option<String>,
 }
 
+pub struct NewDiary {
+    pub title: String,
+    pub description: Option<String>,
+    pub timezone: String,
+}
+
+pub struct NewEntry {
+    pub occurred_at: i64,
+    pub text: Option<String>,
+    pub images: Vec<NewImage>,
+}
+
+pub struct NewImage {
+    pub hash: String,
+    pub width: u32,
+    pub height: u32,
+    pub alt: Option<String>,
+}
+
 pub struct DiaryService {
     write: SqlitePool,
     read: SqlitePool,
-    // blob storatge access
+    images: ImageService,
 }
 
 impl DiaryService {
-    pub fn new(write: SqlitePool, read: SqlitePool) -> DiaryService {
-        return DiaryService { write, read };
+    pub fn new(write: SqlitePool, read: SqlitePool, images: ImageService) -> DiaryService {
+        return DiaryService {
+            write,
+            read,
+            images,
+        };
     }
 
     // Gets all diary details (not days though)
@@ -68,6 +95,7 @@ impl DiaryService {
 
         return Ok(diaries);
     }
+
     // Gets one full diary
     pub async fn get_diary(&self, id: i64) -> Result<DiaryView> {
         let diary = sqlx::query_as!(
@@ -81,8 +109,27 @@ impl DiaryService {
         .await?
         .ok_or(Error::NotFound)?;
 
-        // Sorted the way the page renders: newest day first, and within a day
-        // the entries in the order they happened.
+        return self.load_view(diary).await;
+    }
+
+    pub async fn get_shared_diary(&self, share_token: &str) -> Result<DiaryView> {
+        let diary = sqlx::query_as!(
+            Diary,
+            "SELECT id, title, description, share_token, timezone, created_at
+             FROM diary
+             WHERE share_token = ?",
+            share_token
+        )
+        .fetch_optional(&self.read)
+        .await?
+        .ok_or(Error::NotFound)?;
+
+        return self.load_view(diary).await;
+    }
+
+    async fn load_view(&self, diary: Diary) -> Result<DiaryView> {
+        let id = diary.id;
+
         let entries = sqlx::query_as!(
             Entry,
             "SELECT id, diary_id, local_date, occurred_at, created_at, text
@@ -136,21 +183,231 @@ impl DiaryService {
 
         return Ok(DiaryView { diary, days });
     }
+
     // Creates a new diary entry and generates required data
     // (keys and id)
-    pub fn create_diary(&self, diary_view: DiaryView) {}
+    pub async fn create_diary(&self, new: NewDiary) -> Result<Diary> {
+        // Rejected up front so a typo cannot produce a diary whose entries can
+        // never be dated.
+        let _ = TimeZone::get(&new.timezone)?;
+
+        let share_token = generate_share_token();
+        let created_at = Timestamp::now().as_second();
+
+        let diary = sqlx::query_as!(
+            Diary,
+            "INSERT INTO diary (title, description, share_token, timezone, created_at)
+             VALUES (?, ?, ?, ?, ?)
+             RETURNING id, title, description, share_token, timezone, created_at",
+            new.title,
+            new.description,
+            share_token,
+            new.timezone,
+            created_at
+        )
+        .fetch_one(&self.write)
+        .await?;
+
+        return Ok(diary);
+    }
+
     // Updates title and description of diary
-    pub fn update_diary(&self) {}
+    pub async fn update_diary(
+        &self,
+        id: i64,
+        title: &str,
+        description: Option<&str>,
+    ) -> Result<Diary> {
+        let diary = sqlx::query_as!(
+            Diary,
+            "UPDATE diary
+             SET title = ?, description = ?
+             WHERE id = ?
+             RETURNING id, title, description, share_token, timezone, created_at",
+            title,
+            description,
+            id
+        )
+        .fetch_optional(&self.write)
+        .await?
+        .ok_or(Error::NotFound)?;
+
+        return Ok(diary);
+    }
+
     // delete diary and entries
-    pub fn delete_diary(&self) {}
+    pub async fn delete_diary(&self, id: i64) -> Result<()> {
+        // entry and image rows go with it via ON DELETE CASCADE, which only
+        // fires if the connection has PRAGMA foreign_keys on.
+        let deleted = sqlx::query!("DELETE FROM diary WHERE id = ?", id)
+            .execute(&self.write)
+            .await?;
+
+        if deleted.rows_affected() == 0 {
+            return Err(Error::NotFound);
+        }
+
+        return Ok(());
+    }
+
     // rerolls the public access link id
-    pub fn reroll_diary_keys(&self) {}
-    pub fn create_entry(&self) {}
+    pub async fn reroll_diary_keys(&self, id: i64) -> Result<String> {
+        let share_token = generate_share_token();
+
+        let updated = sqlx::query!(
+            "UPDATE diary SET share_token = ? WHERE id = ?",
+            share_token,
+            id
+        )
+        .execute(&self.write)
+        .await?;
+
+        if updated.rows_affected() == 0 {
+            return Err(Error::NotFound);
+        }
+
+        return Ok(share_token);
+    }
+
+    pub async fn create_entry(&self, diary_id: i64, new: NewEntry) -> Result<EntryView> {
+        let timezone = sqlx::query_scalar!("SELECT timezone FROM diary WHERE id = ?", diary_id)
+            .fetch_optional(&self.read)
+            .await?
+            .ok_or(Error::NotFound)?;
+
+        let local_date = local_date_for(&timezone, new.occurred_at)?;
+        let created_at = Timestamp::now().as_second();
+
+        // Checked before anything is written, so a hash with no blob behind it
+        // fails the request instead of becoming a permanently broken image.
+        for image in &new.images {
+            if !self.images.exists(&image.hash) {
+                return Err(Error::NotFound);
+            }
+        }
+
+        let mut tx = self.write.begin().await?;
+
+        let entry = sqlx::query_as!(
+            Entry,
+            // SQLite reports every RETURNING column as nullable, so the NOT
+            // NULL ones are asserted back with `!`.
+            r#"INSERT INTO entry (diary_id, local_date, occurred_at, created_at, text)
+               VALUES (?, ?, ?, ?, ?)
+               RETURNING id AS "id!", diary_id AS "diary_id!",
+                         local_date AS "local_date!", occurred_at AS "occurred_at!",
+                         created_at AS "created_at!", text"#,
+            diary_id,
+            local_date,
+            new.occurred_at,
+            created_at,
+            new.text
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let mut images = Vec::with_capacity(new.images.len());
+        for (position, image) in new.images.into_iter().enumerate() {
+            let position = position as i64;
+            let width = image.width as i64;
+            let height = image.height as i64;
+
+            let row = sqlx::query_as!(
+                Image,
+                r#"INSERT INTO image (entry_id, hash, width, height, position, alt)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   RETURNING id AS "id!", entry_id AS "entry_id!", hash AS "hash!",
+                             width AS "width!", height AS "height!",
+                             position AS "position!", alt"#,
+                entry.id,
+                image.hash,
+                width,
+                height,
+                position,
+                image.alt
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+
+            images.push(row);
+        }
+
+        tx.commit().await?;
+
+        return Ok(EntryView { entry, images });
+    }
+
     // update diary text
-    pub fn update_entry(&self) {}
-    pub fn delete_entry(&self) {}
-    // stores the blob but does not store in db yet (done by create entry)
-    pub fn create_photo(&self) {}
+    pub async fn update_entry(&self, entry_id: i64, text: Option<&str>) -> Result<Entry> {
+        let entry = sqlx::query_as!(
+            Entry,
+            "UPDATE entry
+             SET text = ?
+             WHERE id = ?
+             RETURNING id, diary_id, local_date, occurred_at, created_at, text",
+            text,
+            entry_id
+        )
+        .fetch_optional(&self.write)
+        .await?
+        .ok_or(Error::NotFound)?;
+
+        return Ok(entry);
+    }
+
+    pub async fn delete_entry(&self, entry_id: i64) -> Result<()> {
+        let deleted = sqlx::query!("DELETE FROM entry WHERE id = ?", entry_id)
+            .execute(&self.write)
+            .await?;
+
+        if deleted.rows_affected() == 0 {
+            return Err(Error::NotFound);
+        }
+
+        return Ok(());
+    }
+
     // removes only the db entry but not the blob?!
-    pub fn delete_photo(&self) {}
+    pub async fn delete_photo(&self, image_id: i64) -> Result<()> {
+        // The blob stays: another entry may share the hash, and the sweep
+        // below is what eventually reclaims it.
+        let deleted = sqlx::query!("DELETE FROM image WHERE id = ?", image_id)
+            .execute(&self.write)
+            .await?;
+
+        if deleted.rows_affected() == 0 {
+            return Err(Error::NotFound);
+        }
+
+        return Ok(());
+    }
+
+    /// Every blob hash still pointed at by a row. The blob sweep needs this to
+    /// know what it is allowed to delete.
+    pub async fn referenced_hashes(&self) -> Result<HashSet<String>> {
+        let hashes = sqlx::query_scalar!("SELECT DISTINCT hash FROM image")
+            .fetch_all(&self.read)
+            .await?
+            .into_iter()
+            .collect();
+
+        return Ok(hashes);
+    }
+}
+
+/// 256 bits of URL-safe randomness. This is the only thing guarding the public
+/// page of a diary, so it has to be unguessable rather than merely unique.
+fn generate_share_token() -> String {
+    let mut raw = [0u8; 32];
+    rand::rng().fill_bytes(&mut raw);
+    return URL_SAFE_NO_PAD.encode(raw);
+}
+
+/// The calendar day an instant falls on for the people reading the diary,
+/// which is why it is stored rather than computed at render time.
+fn local_date_for(timezone: &str, occurred_at: i64) -> Result<String> {
+    let tz = TimeZone::get(timezone)?;
+    let zoned = Timestamp::from_second(occurred_at)?.to_zoned(tz);
+
+    return Ok(zoned.date().to_string());
 }

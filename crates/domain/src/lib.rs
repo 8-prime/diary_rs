@@ -18,6 +18,8 @@ pub enum Error {
     UnsupportedImage,
     #[error("resize failed")]
     Resize(#[from] fast_image_resize::ResizeError),
+    #[error("invalid timezone or timestamp")]
+    Time(#[from] jiff::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
