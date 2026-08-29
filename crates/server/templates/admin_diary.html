@@ -94,10 +94,12 @@
     {% for entry in day.entries %}
       <article class="entry">
         {% for image in entry.images %}
-          <figure class="photo">
-            <img src="{{ image.src }}" srcset="{{ image.srcset }}" sizes="(max-width: 46rem) 100vw, 46rem"
-                 width="{{ image.width }}" height="{{ image.height }}"
-                 alt="{{ image.alt }}" loading="lazy">
+          <figure class="photo tilt-{{ image.tilt }}">
+            <span class="zoom">
+              <img src="{{ image.src }}" srcset="{{ image.srcset }}" sizes="(max-width: 46rem) 100vw, 46rem"
+                   width="{{ image.width }}" height="{{ image.height }}"
+                   alt="{{ image.alt }}" loading="lazy">
+            </span>
             <form method="post" action="/admin/photos/{{ image.id }}/delete">
               <button type="submit">Remove photo</button>
             </form>

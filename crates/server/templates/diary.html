@@ -14,10 +14,23 @@
     {% for entry in day.entries %}
       <article class="entry">
         {% for image in entry.images %}
-          <figure class="photo">
-            <img src="{{ image.src }}" srcset="{{ image.srcset }}" sizes="(max-width: 46rem) 100vw, 46rem"
-                 width="{{ image.width }}" height="{{ image.height }}"
-                 alt="{{ image.alt }}" loading="lazy">
+          <figure class="photo tilt-{{ image.tilt }}">
+            <button class="zoom" type="button" popovertarget="photo-{{ image.id }}">
+              <img src="{{ image.src }}" srcset="{{ image.srcset }}" sizes="(max-width: 46rem) 100vw, 46rem"
+                   width="{{ image.width }}" height="{{ image.height }}"
+                   alt="{{ image.alt }}" loading="lazy">
+            </button>
+            {# A closed popover is display:none, so this copy stays unfetched
+               until the photo is actually opened. #}
+            <div class="lightbox" id="photo-{{ image.id }}" popover>
+              <button class="zoom-out" type="button" popovertarget="photo-{{ image.id }}" popovertargetaction="hide">
+                <span class="pinned">
+                  <img src="{{ image.src }}" srcset="{{ image.srcset }}" sizes="100vw"
+                       width="{{ image.width }}" height="{{ image.height }}"
+                       alt="{{ image.alt }}" loading="lazy">
+                </span>
+              </button>
+            </div>
           </figure>
         {% endfor %}
         {% if let Some(text) = entry.text %}

@@ -16,6 +16,10 @@ pub fn render<T: Template>(template: T) -> Result<Html<String>, AppError> {
 /// and doing it here keeps the templates free of any logic about widths.
 pub struct RenderedImage {
     pub id: i64,
+    /// 0, 1 or 2 -- picks one of the three tilt classes in the stylesheet.
+    /// Derived from the content hash so a photo keeps the same angle across
+    /// reorders, re-uploads and page loads.
+    pub tilt: u32,
     pub src: String,
     pub srcset: String,
     pub width: i64,
@@ -54,6 +58,16 @@ pub fn render_days(view: &DiaryView, images: &ImageService) -> Vec<RenderedDay> 
 
                             RenderedImage {
                                 id: image.id,
+                                // The hash is blake3 hex, so its digits are
+                                // already uniformly distributed -- no further
+                                // hashing needed to spread photos over the
+                                // three angles.
+                                tilt: image
+                                    .hash
+                                    .get(..8)
+                                    .and_then(|prefix| u32::from_str_radix(prefix, 16).ok())
+                                    .unwrap_or(0)
+                                    % 3,
                                 // The widest variant is the fallback for
                                 // anything that ignores srcset.
                                 src: sources

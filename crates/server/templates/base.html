@@ -114,7 +114,22 @@
       justify-content: center;
     }
 
-    .photo img {
+    /* The thumbnail is wrapped in a .zoom element -- a button on the public
+       page, a plain span in the admin -- so the print styling hangs off that
+       rather than off every img inside a figure. */
+    .photo .zoom {
+      display: block;
+      height: 100%;
+      max-width: 100%;
+      padding: 0;
+      border: 0;
+      background: none;
+    }
+
+    /* Only the public page's button actually opens anything. */
+    .photo button.zoom { cursor: zoom-in; }
+
+    .photo .zoom img {
       height: 100%;
       width: auto;
       max-width: 100%;
@@ -123,12 +138,134 @@
       padding: .5rem;
       border-radius: 1px;
       box-shadow: 0 1px 2px rgba(0, 0, 0, .2), 0 6px 16px rgba(0, 0, 0, .18);
-      /* Rotation is a transform, so it tilts the print without disturbing
-         the layout the rules are aligned to. */
-      transform: rotate(-1.1deg);
     }
 
-    .photo:nth-of-type(even) img { transform: rotate(1.4deg); }
+    /* Rotation is a transform, so it tilts the print without disturbing the
+       layout the rules are aligned to. Which of the three a photo gets is
+       decided in views.rs from its content hash, so the angle is stable and
+       does not shuffle when a neighbouring photo is deleted.
+
+       The three angles are deliberately spread across both directions -- one
+       clear left, one clear right, one near-straight. Clustering two of them
+       on the same side makes a page of photos all look like they lean the
+       same way, which is the opposite of hand-taped. */
+    .photo.tilt-0 .zoom img { transform: rotate(  .5deg); }
+    .photo.tilt-1 .zoom img { transform: rotate(-1.5deg); }
+    .photo.tilt-2 .zoom img { transform: rotate( 1.5deg); }
+
+    /* ---- the photo opened full screen ------------------------------- */
+
+    /* A popover, so the browser handles the top layer, the backdrop and
+       Esc-to-close without a line of JavaScript. The UA stylesheet sizes
+       [popover] to fit-content and paints it with `background: canvas`, so
+       part of this block is undoing that. */
+    .lightbox {
+      /* The gutter is the clear space around the print; the frame is the
+         white border of the print itself. Both are named here because the
+         image has to size itself against them -- see .lightbox img. */
+      --gutter: clamp(1.75rem, 6vmin, 4rem);
+      --frame-width: clamp(.5rem, 1.5vmin, 1rem);
+
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100dvh;
+      max-width: none;
+      max-height: none;
+      margin: 0;
+      border: 0;
+      padding: 0;
+      overflow: hidden;
+      background: transparent;
+    }
+
+    .lightbox::backdrop { background: rgba(0, 0, 0, .82); }
+
+    /* The whole surface dismisses: tap the print, tap beside it, or
+       hit Esc. Light dismiss alone would not be enough -- the popover fills
+       the viewport, so there is no "outside" left to click. */
+    .lightbox .zoom-out {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+      padding: var(--gutter);
+      border: 0;
+      background: none;
+      cursor: zoom-out;
+    }
+
+    /* The print: a white border and a shadow that sits it off the board. */
+    .lightbox .pinned {
+      position: relative;
+      display: block;
+      padding: var(--frame-width);
+      background: var(--frame);
+      border-radius: 1px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, .35);
+    }
+
+    /* Pinned prints hang slightly askew. Reusing the per-photo tilt classes
+       means a photo keeps its own angle when opened -- the popover is still a
+       DOM descendant of the figure, so these ancestor selectors match even
+       though it renders in the top layer. Halved, because an angle that reads
+       as casual at thumbnail size wastes real space at full screen. */
+    .photo.tilt-0 .pinned { transform: rotate(  .25deg); }
+    .photo.tilt-1 .pinned { transform: rotate(-.75deg); }
+    .photo.tilt-2 .pinned { transform: rotate( .75deg); }
+
+    /* The pushpin, pressed through the top edge of the print. The first
+       gradient is the highlight on the dome, the second the body. */
+    .lightbox .pinned::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: calc(var(--frame-width) * -.5 - .35rem);
+      width: clamp(1.1rem, 3.2vmin, 1.7rem);
+      aspect-ratio: 1;
+      transform: translateX(-50%);
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 34% 28%, rgba(255, 255, 255, .95) 0 9%, rgba(255, 255, 255, .5) 16%, transparent 46%),
+        radial-gradient(circle at 50% 44%, #e2564d 0 40%, #a8231f 76%, #74110f);
+      box-shadow:
+        0 2px 3px rgba(0, 0, 0, .5),
+        inset 0 -2px 3px rgba(0, 0, 0, .35);
+    }
+
+    .lightbox img {
+      display: block;
+      width: auto;
+      height: auto;
+      /* Sized against the viewport rather than the parent: a percentage
+         max-height inside an auto-height wrapper is indeterminate, so the
+         image would not shrink to fit a short window. */
+      max-width: calc(100vw - (var(--gutter) + var(--frame-width)) * 2);
+      max-height: calc(100dvh - (var(--gutter) + var(--frame-width)) * 2);
+      object-fit: contain;
+      /* None of the thumbnail's taped-print treatment applies here -- the
+         frame and shadow moved out to .pinned. */
+      transform: none;
+      padding: 0;
+      background: none;
+      box-shadow: none;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      /* `allow-discrete` is what lets display and overlay animate, so the
+         popover can fade instead of appearing instantly. */
+      .lightbox, .lightbox::backdrop {
+        opacity: 0;
+        transition: opacity .18s ease, display .18s allow-discrete, overlay .18s allow-discrete;
+      }
+
+      .lightbox:popover-open, .lightbox:popover-open::backdrop { opacity: 1; }
+
+      @starting-style {
+        .lightbox:popover-open, .lightbox:popover-open::backdrop { opacity: 0; }
+      }
+    }
 
     /* ---- masthead and plain UI -------------------------------------- */
 

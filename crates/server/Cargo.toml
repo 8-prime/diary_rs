@@ -18,3 +18,7 @@ tower-http = { version = "0.7.0", features = ["fs", "trace", "limit", "set-heade
 tower_governor = "0.8.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+# Only for getuid() in the startup error message; there is no std equivalent.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

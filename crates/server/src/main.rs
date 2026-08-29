@@ -61,6 +61,19 @@ fn env_or(key: &str, default: &str) -> String {
     return std::env::var(key).unwrap_or_else(|_| default.to_string());
 }
 
+/// The uid the process ended up with, which is the other half of any
+/// permission problem on a bind mount.
+fn current_uid() -> String {
+    #[cfg(unix)]
+    {
+        return unsafe { libc::getuid() }.to_string();
+    }
+    #[cfg(not(unix))]
+    {
+        return "n/a".to_string();
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Before anything reads the environment, so RUST_LOG set in .env still
@@ -93,8 +106,17 @@ async fn main() -> anyhow::Result<()> {
         Ok(dir) => PathBuf::from(dir),
         Err(_) => data_dir.join("images"),
     };
-    std::fs::create_dir_all(&images_dir)?;
-    std::fs::create_dir_all(&data_dir)?;
+    // Named explicitly: a bare "Permission denied (os error 13)" from a
+    // container tells you nothing about which mount is wrong.
+    for dir in [&data_dir, &images_dir] {
+        std::fs::create_dir_all(dir).map_err(|err| {
+            anyhow::anyhow!(
+                "cannot create {} (running as uid {}): {err}",
+                dir.display(),
+                current_uid(),
+            )
+        })?;
+    }
 
     let (write, read) = domain::db::connect(&data_dir.join("diary.db")).await?;
 
